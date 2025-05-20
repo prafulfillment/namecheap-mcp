@@ -103,13 +103,17 @@ To use this MCP service with Windsurf, add the following configuration to your W
 
 ```json
 "mcpServers": {
-  "Namecheap DNS Manager": {
-    "command": "python",
-    "args": [
-      "/Users/praful/dev/experiments/namecheap-mcp/src/main.py",
-      "--stdio"
-    ],
-  }
+  "Namecheap": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "mcp[cli]",
+        "mcp",
+        "run",
+        "/Users/praful/dev/experiments/namecheap-mcp/src/main.py"
+      ]
+   }
 }
 ```
 
