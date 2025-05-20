@@ -16,8 +16,8 @@ Methods implemented:
 
 import requests
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Any
-from models import EmailForward, HostRecord
+from typing import Dict, List, Any, Union
+from models import EmailForward
 from utils import extract_domain_parts
 
 
@@ -387,3 +387,288 @@ class Namecheap:
             }
         
         return {'IsSuccess': False, 'Hosts': []}
+    
+    def get_domains(self, page_size: int = 100, page: int = 1, sort_by: str = None, 
+                 search_term: str = None, list_type: str = None) -> Dict[str, Any]:
+        """
+        Gets a list of domains in the user's account.
+        
+        Args:
+            page_size: Number of domains to return per page (default: 100, max: 100)
+            page: Page number to return (default: 1)
+            sort_by: Column to sort by (DOMAINNAME, EXPIREDATE, CREATEDATE)
+            search_term: Term to search for in the domain list
+            list_type: Type of domains to include (ALL, EXPIRING, EXPIRED)
+            
+        Returns:
+            Dictionary containing the API response with domain list
+        """
+        params = {
+            'Page': str(page),
+            'PageSize': str(min(page_size, 100))  # Ensure page size doesn't exceed 100
+        }
+        
+        # Add optional parameters
+        if sort_by:
+            params['SortBy'] = sort_by
+        
+        if search_term:
+            params['SearchTerm'] = search_term
+            
+        if list_type:
+            params['ListType'] = list_type
+        
+        root = self._make_request('namecheap.domains.getList', params)
+        
+        domains_result = root.find('.//nc:CommandResponse/nc:DomainGetListResult', self.NAMESPACE)
+        domains = []
+        
+        if domains_result is not None:
+            for domain in domains_result.findall('.//nc:Domain', self.NAMESPACE):
+                domain_data = {
+                    'ID': domain.attrib.get('ID', ''),
+                    'Name': domain.attrib.get('Name', ''),
+                    'User': domain.attrib.get('User', ''),
+                    'Created': domain.attrib.get('Created', ''),
+                    'Expires': domain.attrib.get('Expires', ''),
+                    'IsExpired': domain.attrib.get('IsExpired', '').lower() == 'true',
+                    'IsLocked': domain.attrib.get('IsLocked', '').lower() == 'true',
+                    'AutoRenew': domain.attrib.get('AutoRenew', '').lower() == 'true',
+                    'WhoisGuard': domain.attrib.get('WhoisGuard', ''),
+                    'IsPremium': domain.attrib.get('IsPremium', '').lower() == 'true',
+                    'IsOurDNS': domain.attrib.get('IsOurDNS', '').lower() == 'true'
+                }
+                domains.append(domain_data)
+            
+            paging = domains_result.find('.//nc:Paging', self.NAMESPACE)
+            paging_info = {}
+            
+            if paging is not None:
+                paging_info = {
+                    'TotalItems': int(paging.attrib.get('TotalItems', '0')),
+                    'CurrentPage': int(paging.attrib.get('CurrentPage', '0')),
+                    'PageSize': int(paging.attrib.get('PageSize', '0')),
+                    'TotalPages': int(paging.attrib.get('TotalPages', '0'))
+                }
+            
+            return {
+                'Domains': domains,
+                'Paging': paging_info
+            }
+        
+        return {'Domains': [], 'Paging': {}}
+    
+    def get_domain_info(self, domain_name: str) -> Dict[str, Any]:
+        """
+        Gets detailed information about a specific domain.
+        
+        Args:
+            domain_name: The domain name to get information for
+            
+        Returns:
+            Dictionary containing detailed domain information
+        """
+        sld, tld = extract_domain_parts(domain_name)
+        
+        params = {
+            'DomainName': domain_name
+        }
+        
+        root = self._make_request('namecheap.domains.getInfo', params)
+        
+        domain_result = root.find('.//nc:CommandResponse/nc:DomainGetInfoResult', self.NAMESPACE)
+        
+        if domain_result is not None:
+            def get_attr(el, attr, default=''):
+                return el.attrib.get(attr, default) if el is not None else default
+    
+            domain_info = {
+                'ID': get_attr(domain_result, 'ID'),
+                'DomainName': get_attr(domain_result, 'DomainName'),
+                'OwnerName': get_attr(domain_result, 'OwnerName'),
+                'IsOwner': get_attr(domain_result, 'IsOwner', 'false').lower() == 'true',
+                'IsPremium': get_attr(domain_result, 'IsPremium', 'false').lower() == 'true',
+                'IsOurDNS': get_attr(domain_result, 'IsOurDNS', 'false').lower() == 'true',
+                'IsPremiumDNS': get_attr(domain_result, 'IsPremiumDNS', 'false').lower() == 'true',
+                'IsPremiumDNSRegistration': get_attr(domain_result, 'IsPremiumDNSRegistration', 'false').lower() == 'true',
+                'IsExpired': get_attr(domain_result, 'IsExpired', 'false').lower() == 'true',
+                'IsLocked': get_attr(domain_result, 'Status', '').lower() == 'locked',
+                'AutoRenew': get_attr(domain_result, 'AutoRenew', 'false').lower() == 'true',
+                'WhoisGuard': get_attr(domain_result, 'WhoisGuard', ''),
+                'IsPremiumDomain': get_attr(domain_result, 'IsPremiumDomain', 'false').lower() == 'true',
+                'CreatedDate': '',
+                'ExpiredDate': '',
+                'UpdatedDate': '',
+            }
+
+            domain_details = domain_result.find('.//nc:DomainDetails', self.NAMESPACE)
+            if domain_details is not None:
+                created_elem = domain_details.find('nc:CreatedDate', self.NAMESPACE)
+                expired_elem = domain_details.find('nc:ExpiredDate', self.NAMESPACE)
+                
+                domain_info.update({
+                    'CreatedDate': created_elem.text if created_elem is not None else '',
+                    'ExpiredDate': expired_elem.text if expired_elem is not None else '',
+                })
+            
+            nameservers = []
+            for ns in domain_result.findall('.//nc:DNSDetails/nc:Nameserver', self.NAMESPACE):
+                if ns.text:
+                    nameservers.append(ns.text)
+            
+            dns_details = domain_result.find('.//nc:DNSDetails', self.NAMESPACE)
+            if dns_details is not None:
+                domain_info['DNSDetails'] = {
+                    'ProviderType': get_attr(dns_details, 'ProviderType', ''),
+                    'IsUsingOurDNS': get_attr(dns_details, 'IsUsingOurDNS', 'false').lower() == 'true',
+                    'IsPremiumDNS': get_attr(dns_details, 'IsPremiumDNS', 'false').lower() == 'true',
+                    'Nameservers': nameservers
+                }
+            else:
+                domain_info['DNSDetails'] = {
+                    'ProviderType': '',
+                    'IsUsingOurDNS': False,
+                    'IsPremiumDNS': False,
+                    'Nameservers': nameservers
+                }
+            
+            whois_guard = {'Enabled': False}
+            wg_enabled = domain_result.attrib.get('WhoisGuard', '').lower()
+            
+            if wg_enabled == 'true' or wg_enabled == 'enabled':
+                wg_info = domain_result.find('.//nc:Whoisguard', self.NAMESPACE)
+                if wg_info is not None:
+                    whois_guard = {
+                        'Enabled': True,
+                        'ID': get_attr(wg_info, 'ID'),
+                        'ExpiredDate': get_attr(wg_info, 'ExpiredDate'),
+                        'EmailDetails': {
+                            'WhoisGuardEmail': get_attr(wg_info, 'WhoisGuardEmail'),
+                            'ForwardedTo': get_attr(wg_info, 'ForwardedTo'),
+                            'LastAutoEmailChangeDate': get_attr(wg_info, 'LastAutoEmailChangeDate'),
+                            'AutoEmailChangeFrequencyDays': get_attr(wg_info, 'AutoEmailChangeFrequencyDays')
+                        }
+                    }
+            
+            domain_info['WhoisGuardInfo'] = whois_guard 
+            
+            return domain_info
+        
+        return {}
+    
+    def check_domains_availability(self, domains: Union[str, List[str]], suggestions: bool = False) -> Dict[str, Any]:
+        """
+        Checks the availability of one or multiple domain names.
+        
+        Args:
+            domains: Single domain as a string or list of domains to check
+            suggestions: Whether to include domain suggestions (default: False)
+            
+        Returns:
+            Dictionary containing the availability results for each domain
+            
+        Example:
+            # Check a single domain
+            result = namecheap.check_domains_availability('example.com')
+            
+            # Check multiple domains
+            result = namecheap.check_domains_availability(['example.com', 'test.com'])
+            
+            # Check with suggestions
+            result = namecheap.check_domains_availability('example.com', suggestions=True)
+        """
+        # Convert single domain to list if needed
+        if isinstance(domains, str):
+            domains = [domains]
+        
+        # Join domains with comma for the API
+        domains_str = ','.join(domains)
+        
+        params = {
+            'DomainList': domains_str
+        }
+        
+        # Add suggestions parameter if needed
+        if suggestions:
+            params['CheckType'] = 'REGISTER'
+        
+        root = self._make_request('namecheap.domains.check', params)
+        
+        # Parse the response
+        command_response = root.find('.//nc:CommandResponse', self.NAMESPACE)
+        
+        if command_response is not None:
+            domain_results = []
+            
+            # Parse each domain result
+            for domain_result in command_response.findall('.//nc:DomainCheckResult', self.NAMESPACE):
+                domain = domain_result.attrib.get('Domain', '')
+                available = domain_result.attrib.get('Available', '').lower() == 'true'
+                error_no = domain_result.attrib.get('ErrorNo', '0')
+                description = domain_result.attrib.get('Description', '')
+                is_premium = domain_result.attrib.get('IsPremiumName', '').lower() == 'true'
+                premium_reg_price = domain_result.attrib.get('PremiumRegistrationPrice', '')
+                premium_renew_price = domain_result.attrib.get('PremiumRenewalPrice', '')
+                premium_restore_price = domain_result.attrib.get('PremiumRestorePrice', '')
+                premium_transfer_price = domain_result.attrib.get('PremiumTransferPrice', '')
+                icann_fee = domain_result.attrib.get('IcannFee', '')
+                eap_fee = domain_result.attrib.get('EapFee', '')
+                
+                domain_info = {
+                    'Domain': domain,
+                    'Available': available,
+                    'ErrorNo': error_no,
+                    'Description': description,
+                    'IsPremium': is_premium,
+                    'Prices': {
+                        'Registration': premium_reg_price if is_premium else None,
+                        'Renewal': premium_renew_price if is_premium else None,
+                        'Restore': premium_restore_price if is_premium else None,
+                        'Transfer': premium_transfer_price if is_premium else None,
+                        'IcannFee': icann_fee,
+                        'EapFee': eap_fee
+                    }
+                }
+                
+                # Add premium pricing if available
+                if is_premium and premium_reg_price:
+                    domain_info['PremiumPricing'] = {
+                        'Registration': premium_reg_price,
+                        'Renewal': premium_renew_price,
+                        'Restore': premium_restore_price,
+                        'Transfer': premium_transfer_price
+                    }
+                
+                domain_results.append(domain_info)
+            
+            # Parse suggestions if requested
+            suggestions_list = []
+            if suggestions:
+                suggestions_el = command_response.find('.//nc:DomainCheckData/nc:DomainCheckResults', self.NAMESPACE)
+                if suggestions_el is not None:
+                    for sug in suggestions_el.findall('.//nc:DomainSuggestion', self.NAMESPACE):
+                        sug_domain = sug.attrib.get('Name', '')
+                        sug_available = sug.attrib.get('Available', '').lower() == 'true'
+                        
+                        suggestion = {
+                            'Domain': sug_domain,
+                            'Available': sug_available
+                        }
+                        
+                        if sug_available:
+                            suggestion['Price'] = sug.attrib.get('RegistrationPrice', '')
+                            suggestion['PromoPrice'] = sug.attrib.get('PromoRegistrationPrice', '')
+                            suggestion['IsPremium'] = sug.attrib.get('IsPremium', '').lower() == 'true'
+                        
+                        suggestions_list.append(suggestion)
+                
+                return {
+                    'Results': domain_results,
+                    'Suggestions': suggestions_list if suggestions_list else None
+                }
+            
+            return {
+                'Results': domain_results
+            }
+        
+        return {'Results': []}

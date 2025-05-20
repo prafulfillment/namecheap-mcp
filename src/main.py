@@ -5,7 +5,7 @@ MCP Server to use Namecheap to change DNS servers for existing domains
 import os
 import json
 import argparse
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from namecheap import Namecheap
@@ -116,6 +116,47 @@ def set_email_forwarding(domain_name: str, forwards: List[Dict[str, str]]) -> Di
     )
     return {'success': result, 'message': 'Email forwarding set successfully'}
 
+
+@mcp.tool(
+    annotations={
+        "title": "Get Domains",
+        "readOnlyHint": True,
+        "openWorldHint": True
+    }
+)
+def get_domains() -> Dict[str, Any]:
+    """Gets a list of domains in the user's account"""
+    result = namecheap.get_domains()
+    return {'domains': result}
+
+@mcp.tool(
+    annotations={
+        "title": "Get Domain",
+        "readOnlyHint": True,
+        "openWorldHint": True
+    }
+)
+def get_domain_info(domain_name: str) -> Dict[str, Any]:
+    """Gets a domain in the user's account"""
+    result = namecheap.get_domain_info(
+        domain_name=domain_name
+    )
+    return {'domain_info': result}
+
+@mcp.tool(
+    annotations={
+        "title": "Check domains for availability",
+        "readOnlyHint": True,
+        "openWorldHint": True
+    }
+)
+def check_domains_availability(domains: Union[str, List[str]], suggestions: bool = False) -> Dict[str, Any]:
+    """Checks the availability of one or multiple domain names"""
+    result = namecheap.check_domains_availability(
+        domains=domains,
+        suggestions=suggestions
+    )
+    return {'domains_availability': result}
 
 @mcp.tool(
     annotations={
