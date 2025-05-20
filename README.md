@@ -111,7 +111,7 @@ To use this MCP service with Windsurf, add the following configuration to your W
         "mcp[cli]",
         "mcp",
         "run",
-        "/Users/praful/dev/experiments/namecheap-mcp/src/main.py"
+        "namecheap-mcp/src/main.py"
       ]
    }
 }
